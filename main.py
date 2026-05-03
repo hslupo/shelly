@@ -254,10 +254,14 @@ class SMACard(QGroupBox):
         self._status_text = lbl("Unbekannt", bold=True)
         self._power_val = lbl()
         self._total_val = lbl()
+        self._day_val = lbl()
         self._freq_val = lbl()
         self._v_l1 = lbl()
         self._v_l2 = lbl()
         self._v_l3 = lbl()
+        self._dc_a_val = lbl()
+        self._dc_b_val = lbl()
+        self._temp_val = lbl()
         self._dev_status = lbl()
         self._ip_val = lbl()
         self._error_lbl = QLabel("")
@@ -272,10 +276,14 @@ class SMACard(QGroupBox):
         for label_text, val_widget in [
             ("Leistung:",        self._power_val),
             ("Gesamtertrag:",    self._total_val),
+            ("Tagesertrag:",     self._day_val),
             ("Netzfrequenz:",    self._freq_val),
             ("Spannung L1:",     self._v_l1),
             ("Spannung L2:",     self._v_l2),
             ("Spannung L3:",     self._v_l3),
+            ("DC-Leistung A:",   self._dc_a_val),
+            ("DC-Leistung B:",   self._dc_b_val),
+            ("Temperatur:",      self._temp_val),
             ("Gerätestatus:",    self._dev_status),
             ("IP:",              self._ip_val),
         ]:
@@ -291,8 +299,9 @@ class SMACard(QGroupBox):
             self._status_indicator.setStyleSheet("color: #95a5a6;")
             self._status_text.setText("Offline")
             self._error_lbl.setText(status.error)
-            for w in (self._power_val, self._total_val,
+            for w in (self._power_val, self._total_val, self._day_val,
                       self._freq_val, self._v_l1, self._v_l2, self._v_l3,
+                      self._dc_a_val, self._dc_b_val, self._temp_val,
                       self._dev_status):
                 w.setText("—")
             return
@@ -302,6 +311,7 @@ class SMACard(QGroupBox):
         self._status_text.setText("Online")
         self._power_val.setText(f"{status.power_w:.0f} W")
         self._total_val.setText(f"{status.total_yield_kwh:.1f} kWh")
+        self._day_val.setText(f"{status.day_yield_kwh:.2f} kWh")
         self._freq_val.setText(
             f"{status.frequency_hz:.2f} Hz" if status.frequency_hz is not None else "—"
         )
@@ -313,6 +323,15 @@ class SMACard(QGroupBox):
         )
         self._v_l3.setText(
             f"{status.voltage_l3:.1f} V" if status.voltage_l3 is not None else "—"
+        )
+        self._dc_a_val.setText(
+            f"{status.dc_power_a_w:.0f} W" if status.dc_power_a_w is not None else "—"
+        )
+        self._dc_b_val.setText(
+            f"{status.dc_power_b_w:.0f} W" if status.dc_power_b_w is not None else "—"
+        )
+        self._temp_val.setText(
+            f"{status.temp_c:.1f} °C" if status.temp_c is not None else "—"
         )
         self._dev_status.setText(status.device_status or "—")
 

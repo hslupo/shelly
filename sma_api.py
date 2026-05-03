@@ -22,14 +22,19 @@ DEFAULT_UNIT_ID = 1       # SMA-Standardwert (Sunny Tripower)
 TIMEOUT = 3.0
 SCAN_TIMEOUT = 0.5
 
-# SMA Modbus-Register (Sunny Tripower, FC3 – Read Holding Registers)
+# SMA Modbus-Register (Sunny Tripower STP5.0-3SE-40, FC3 – Read Holding Registers)
+# Gerät-spezifisch validiert via direktem Register-Scan
 _REG_POWER_W        = 30775   # Wirkleistung AC gesamt (W),       S32
 _REG_TOTAL_YIELD_WH = 30529   # Gesamtertrag (Wh),                U32
-_REG_VOLTAGE_L1     = 30769   # Spannung L1 (1/100 V),            U32
-_REG_VOLTAGE_L2     = 30771   # Spannung L2 (1/100 V),            U32
-_REG_VOLTAGE_L3     = 30773   # Spannung L3 (1/100 V),            U32
+_REG_DAY_YIELD_WH   = 30535   # Tagesertrag (Wh),                 U32
+_REG_VOLTAGE_L1     = 30783   # Spannung L1 (1/100 V),            U32
+_REG_VOLTAGE_L2     = 30785   # Spannung L2 (1/100 V),            U32
+_REG_VOLTAGE_L3     = 30787   # Spannung L3 (1/100 V),            U32
 _REG_FREQUENCY      = 30803   # Netzfrequenz (1/100 Hz),          U32
 _REG_STATUS         = 30201   # Betriebsstatus,                   U32
+_REG_DC_POWER_1     = 30777   # DC-Leistung String A (W),         S32
+_REG_DC_POWER_2     = 30779   # DC-Leistung String B (W),         S32
+_REG_TEMP_C         = 30953   # Gehäusetemperatur (1/10 °C),      S32
 
 _NAN_S32 = 0x80000000
 _NAN_U32 = 0xFFFFFFFF
@@ -53,10 +58,14 @@ class SMAStatus:
     online: bool
     power_w: float = 0.0
     total_yield_kwh: float = 0.0
+    day_yield_kwh: float = 0.0
     voltage_l1: Optional[float] = None
     voltage_l2: Optional[float] = None
     voltage_l3: Optional[float] = None
     frequency_hz: Optional[float] = None
+    dc_power_a_w: Optional[float] = None
+    dc_power_b_w: Optional[float] = None
+    temp_c: Optional[float] = None
     device_status: str = ""
     error: str = ""
 
@@ -167,11 +176,35 @@ def fetch_sma_status(
             if val is not None:
                 status.voltage_l3 = val / 100.0
 
+        regs = _read_reg(client, _REG_DAY_YIELD_WH, unit_id)
+        if regs is not None:
+            val = _to_u32(regs)
+            if val is not None:
+                status.day_yield_kwh = val / 1000.0
+
         regs = _read_reg(client, _REG_FREQUENCY, unit_id)
         if regs is not None:
             val = _to_u32(regs)
             if val is not None:
                 status.frequency_hz = val / 100.0
+
+        regs = _read_reg(client, _REG_DC_POWER_1, unit_id)
+        if regs is not None:
+            val = _to_s32(regs)
+            if val is not None:
+                status.dc_power_a_w = float(val)
+
+        regs = _read_reg(client, _REG_DC_POWER_2, unit_id)
+        if regs is not None:
+            val = _to_s32(regs)
+            if val is not None:
+                status.dc_power_b_w = float(val)
+
+        regs = _read_reg(client, _REG_TEMP_C, unit_id)
+        if regs is not None:
+            val = _to_s32(regs)
+            if val is not None:
+                status.temp_c = val / 10.0
 
         regs = _read_reg(client, _REG_STATUS, unit_id)
         if regs is not None:
