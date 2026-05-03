@@ -18,15 +18,17 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QPushButton,
     QMessageBox,
+    QPushButton,
     QSpinBox,
     QStatusBar,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from shelly_api import ShellyStatus, discover_devices, fetch_device
+from sma_api import SMAStatus, discover_sma_devices, fetch_sma_status
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 
@@ -36,6 +38,11 @@ DEFAULT_CONFIG = {
         {"name": "Steckdose 2", "ip": "192.168.1.101", "gen": None},
     ],
     "refresh_interval": 10,
+    "sma": {
+        "ip": "",
+        "port": 502,
+        "unit_id": 3,
+    },
 }
 
 
@@ -186,6 +193,100 @@ class DeviceCard(QGroupBox):
 
 
 # ---------------------------------------------------------------------------
+# SMA-Karte
+# ---------------------------------------------------------------------------
+
+class SMACard(QGroupBox):
+    """Zeigt Status-Daten des SMA-Wechselrichters."""
+
+    def __init__(self, parent=None):
+        super().__init__("SMA Sunny Tripower", parent)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QGridLayout(self)
+        layout.setSpacing(6)
+
+        def lbl(text="—", bold=False) -> QLabel:
+            w = QLabel(text)
+            if bold:
+                f = w.font()
+                f.setBold(True)
+                w.setFont(f)
+            return w
+
+        self._status_indicator = QLabel("●")
+        self._status_indicator.setFont(QFont("Segoe UI", 18))
+        self._status_text = lbl("Unbekannt", bold=True)
+        self._power_val = lbl()
+        self._day_val = lbl()
+        self._total_val = lbl()
+        self._freq_val = lbl()
+        self._v_l1 = lbl()
+        self._v_l2 = lbl()
+        self._v_l3 = lbl()
+        self._dev_status = lbl()
+        self._ip_val = lbl()
+        self._error_lbl = QLabel("")
+        self._error_lbl.setStyleSheet("color: #e74c3c;")
+        self._error_lbl.setWordWrap(True)
+
+        row = 0
+        layout.addWidget(self._status_indicator, row, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._status_text, row, 1, 1, 3)
+        row += 1
+
+        for label_text, val_widget in [
+            ("Leistung:",        self._power_val),
+            ("Tagesertrag:",     self._day_val),
+            ("Gesamtertrag:",    self._total_val),
+            ("Netzfrequenz:",    self._freq_val),
+            ("Spannung L1:",     self._v_l1),
+            ("Spannung L2:",     self._v_l2),
+            ("Spannung L3:",     self._v_l3),
+            ("Gerätestatus:",    self._dev_status),
+            ("IP:",              self._ip_val),
+        ]:
+            layout.addWidget(QLabel(label_text), row, 0, 1, 1, Qt.AlignmentFlag.AlignRight)
+            layout.addWidget(val_widget, row, 1, 1, 3)
+            row += 1
+
+        layout.addWidget(self._error_lbl, row, 0, 1, 4)
+
+    def update_status(self, status: SMAStatus):
+        self._ip_val.setText(status.ip if status.ip else "—")
+        if not status.online:
+            self._status_indicator.setStyleSheet("color: #95a5a6;")
+            self._status_text.setText("Offline")
+            self._error_lbl.setText(status.error)
+            for w in (self._power_val, self._day_val, self._total_val,
+                      self._freq_val, self._v_l1, self._v_l2, self._v_l3,
+                      self._dev_status):
+                w.setText("—")
+            return
+
+        self._error_lbl.setText("")
+        self._status_indicator.setStyleSheet("color: #2ecc71;")
+        self._status_text.setText("Online")
+        self._power_val.setText(f"{status.power_w:.0f} W")
+        self._day_val.setText(f"{status.day_yield_kwh:.3f} kWh")
+        self._total_val.setText(f"{status.total_yield_kwh:.1f} kWh")
+        self._freq_val.setText(
+            f"{status.frequency_hz:.2f} Hz" if status.frequency_hz is not None else "—"
+        )
+        self._v_l1.setText(
+            f"{status.voltage_l1:.1f} V" if status.voltage_l1 is not None else "—"
+        )
+        self._v_l2.setText(
+            f"{status.voltage_l2:.1f} V" if status.voltage_l2 is not None else "—"
+        )
+        self._v_l3.setText(
+            f"{status.voltage_l3:.1f} V" if status.voltage_l3 is not None else "—"
+        )
+        self._dev_status.setText(status.device_status or "—")
+
+
+# ---------------------------------------------------------------------------
 # Einstellungs-Dialog
 # ---------------------------------------------------------------------------
 
@@ -220,7 +321,7 @@ class SettingsDialog(QDialog):
         form_r.addRow("Intervall:", self._interval_spin)
         layout.addWidget(grp_refresh)
 
-        grp_discovery = QGroupBox("Gerätesuche")
+        grp_discovery = QGroupBox("Shelly-Gerätesuche")
         discovery_layout = QVBoxLayout(grp_discovery)
         self._discover_btn = QPushButton("Shelly-Geräte automatisch finden")
         self._discover_btn.clicked.connect(self._on_find_devices)
@@ -229,6 +330,28 @@ class SettingsDialog(QDialog):
         discovery_layout.addWidget(self._discover_btn)
         discovery_layout.addWidget(self._discover_info)
         layout.addWidget(grp_discovery)
+
+        # SMA-Einstellungen
+        grp_sma = QGroupBox("SMA Wechselrichter (Modbus TCP)")
+        form_sma = QFormLayout(grp_sma)
+        sma_cfg = self._config.get("sma", {})
+        self._sma_ip = QLineEdit(sma_cfg.get("ip", ""))
+        self._sma_port = QSpinBox()
+        self._sma_port.setRange(1, 65535)
+        self._sma_port.setValue(sma_cfg.get("port", 502))
+        self._sma_unit = QSpinBox()
+        self._sma_unit.setRange(1, 247)
+        self._sma_unit.setValue(sma_cfg.get("unit_id", 3))
+        form_sma.addRow("IP-Adresse:", self._sma_ip)
+        form_sma.addRow("Port:", self._sma_port)
+        form_sma.addRow("Unit-ID:", self._sma_unit)
+        sma_disc_btn = QPushButton("SMA-Gerät automatisch finden (Port 502)")
+        sma_disc_btn.clicked.connect(self._on_find_sma)
+        self._sma_disc_info = QLabel("")
+        self._sma_disc_info.setWordWrap(True)
+        form_sma.addRow(sma_disc_btn)
+        form_sma.addRow(self._sma_disc_info)
+        layout.addWidget(grp_sma)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -248,7 +371,33 @@ class SettingsDialog(QDialog):
             if new_ip != old_ip:
                 self._config["devices"][i]["gen"] = None  # neu erkennen
         self._config["refresh_interval"] = self._interval_spin.value()
+        self._config.setdefault("sma", {})
+        self._config["sma"]["ip"] = self._sma_ip.text().strip()
+        self._config["sma"]["port"] = self._sma_port.value()
+        self._config["sma"]["unit_id"] = self._sma_unit.value()
         self.accept()
+
+    def _on_find_sma(self):
+        sender_btn = self.sender()
+        if isinstance(sender_btn, QPushButton):
+            sender_btn.setEnabled(False)
+        self._sma_disc_info.setText("Suche läuft …")
+        QApplication.processEvents()
+        try:
+            ips = discover_sma_devices()
+        except Exception as exc:
+            self._sma_disc_info.setText(f"Fehler: {exc}")
+            if isinstance(sender_btn, QPushButton):
+                sender_btn.setEnabled(True)
+            return
+        if not ips:
+            self._sma_disc_info.setText("Kein Gerät mit offenem Port 502 gefunden.")
+        else:
+            self._sma_ip.setText(ips[0])
+            extra = f" (+{len(ips)-1} weitere)" if len(ips) > 1 else ""
+            self._sma_disc_info.setText(f"Gefunden: {ips[0]}{extra}")
+        if isinstance(sender_btn, QPushButton):
+            sender_btn.setEnabled(True)
 
     def _on_find_devices(self):
         self._discover_btn.setEnabled(False)
@@ -310,6 +459,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(700, 350)
         self._config = load_config()
         self._cards: list[DeviceCard] = []
+        self._sma_card: SMACard | None = None
         self._build_ui()
         self._setup_timer()
         self._refresh()
@@ -332,14 +482,30 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(settings_btn)
         main_layout.addLayout(toolbar)
 
-        # Geräte-Karten
-        cards_layout = QHBoxLayout()
+        # Tabs
+        self._tabs = QTabWidget()
+
+        # Tab 0: Shelly
+        shelly_widget = QWidget()
+        cards_layout = QHBoxLayout(shelly_widget)
+        cards_layout.setContentsMargins(4, 4, 4, 4)
         for dev in self._config["devices"]:
             card = DeviceCard(dev.get("name", "Gerät"))
             card.set_device_config(dev)
             self._cards.append(card)
             cards_layout.addWidget(card)
-        main_layout.addLayout(cards_layout)
+        self._tabs.addTab(shelly_widget, "Shelly")
+
+        # Tab 1: SMA PV
+        sma_widget = QWidget()
+        sma_layout = QHBoxLayout(sma_widget)
+        sma_layout.setContentsMargins(4, 4, 4, 4)
+        self._sma_card = SMACard()
+        sma_layout.addWidget(self._sma_card)
+        sma_layout.addStretch()
+        self._tabs.addTab(sma_widget, "SMA PV")
+
+        main_layout.addWidget(self._tabs)
 
         # Statusleiste
         self._statusbar = QStatusBar()
@@ -359,11 +525,13 @@ class MainWindow(QMainWindow):
         from PyQt6.QtCore import QThread, pyqtSignal
 
         class Worker(QThread):
-            done = pyqtSignal(list)
+            shelly_done = pyqtSignal(list)
+            sma_done = pyqtSignal(object)
 
-            def __init__(self, devices):
+            def __init__(self, devices, sma_cfg):
                 super().__init__()
                 self._devices = devices
+                self._sma_cfg = sma_cfg
 
             def run(self):
                 results = []
@@ -374,13 +542,24 @@ class MainWindow(QMainWindow):
                         gen=dev.get("gen"),
                     )
                     results.append(status)
-                self.done.emit(results)
+                self.shelly_done.emit(results)
 
-        self._worker = Worker(self._config["devices"])
-        self._worker.done.connect(self._on_results)
+                sma_ip = self._sma_cfg.get("ip", "").strip()
+                if sma_ip:
+                    sma_status = fetch_sma_status(
+                        ip=sma_ip,
+                        port=self._sma_cfg.get("port", 502),
+                        unit_id=self._sma_cfg.get("unit_id", 3),
+                    )
+                    self.sma_done.emit(sma_status)
+
+        sma_cfg = self._config.get("sma", {})
+        self._worker = Worker(self._config["devices"], sma_cfg)
+        self._worker.shelly_done.connect(self._on_shelly_results)
+        self._worker.sma_done.connect(self._on_sma_result)
         self._worker.start()
 
-    def _on_results(self, results: list[ShellyStatus]):
+    def _on_shelly_results(self, results: list[ShellyStatus]):
         for card, status in zip(self._cards, results):
             card.update_status(status)
         from PyQt6.QtCore import QDateTime
@@ -388,16 +567,18 @@ class MainWindow(QMainWindow):
         self._statusbar.showMessage(f"Zuletzt aktualisiert: {now}")
         self._refresh_btn.setEnabled(True)
 
+    def _on_sma_result(self, status: SMAStatus):
+        if self._sma_card is not None:
+            self._sma_card.update_status(status)
+
     def _open_settings(self):
         dlg = SettingsDialog(self._config, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._config = dlg.get_config()
             save_config(self._config)
-            # Karten-Titel aktualisieren
             for card, dev in zip(self._cards, self._config["devices"]):
                 card.setTitle(dev.get("name", "Gerät"))
                 card.set_device_config(dev)
-            # Timer neu starten
             self._timer.stop()
             self._timer.start(self._config.get("refresh_interval", 10) * 1000)
             self._refresh()
