@@ -11,5 +11,10 @@
       "gen": 2
     }
   ],
-  "refresh_interval": 10
+  "refresh_interval": 10,
+  "sma": {
+    "ip": "192.168.178.64",
+    "port": 502,
+    "unit_id": 3
+  }
 }

@@ -253,7 +253,6 @@ class SMACard(QGroupBox):
         self._status_indicator.setFont(QFont("Segoe UI", 18))
         self._status_text = lbl("Unbekannt", bold=True)
         self._power_val = lbl()
-        self._day_val = lbl()
         self._total_val = lbl()
         self._freq_val = lbl()
         self._v_l1 = lbl()
@@ -272,7 +271,6 @@ class SMACard(QGroupBox):
 
         for label_text, val_widget in [
             ("Leistung:",        self._power_val),
-            ("Tagesertrag:",     self._day_val),
             ("Gesamtertrag:",    self._total_val),
             ("Netzfrequenz:",    self._freq_val),
             ("Spannung L1:",     self._v_l1),
@@ -293,7 +291,7 @@ class SMACard(QGroupBox):
             self._status_indicator.setStyleSheet("color: #95a5a6;")
             self._status_text.setText("Offline")
             self._error_lbl.setText(status.error)
-            for w in (self._power_val, self._day_val, self._total_val,
+            for w in (self._power_val, self._total_val,
                       self._freq_val, self._v_l1, self._v_l2, self._v_l3,
                       self._dev_status):
                 w.setText("—")
@@ -303,7 +301,6 @@ class SMACard(QGroupBox):
         self._status_indicator.setStyleSheet("color: #2ecc71;")
         self._status_text.setText("Online")
         self._power_val.setText(f"{status.power_w:.0f} W")
-        self._day_val.setText(f"{status.day_yield_kwh:.3f} kWh")
         self._total_val.setText(f"{status.total_yield_kwh:.1f} kWh")
         self._freq_val.setText(
             f"{status.frequency_hz:.2f} Hz" if status.frequency_hz is not None else "—"

@@ -18,13 +18,12 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 MODBUS_PORT = 502
-DEFAULT_UNIT_ID = 3       # SMA-Standardwert
+DEFAULT_UNIT_ID = 1       # SMA-Standardwert (Sunny Tripower)
 TIMEOUT = 3.0
 SCAN_TIMEOUT = 0.5
 
 # SMA Modbus-Register (Sunny Tripower, FC3 – Read Holding Registers)
 _REG_POWER_W        = 30775   # Wirkleistung AC gesamt (W),       S32
-_REG_DAY_YIELD_WH   = 30517   # Tagesertrag (Wh),                 U32
 _REG_TOTAL_YIELD_WH = 30529   # Gesamtertrag (Wh),                U32
 _REG_VOLTAGE_L1     = 30769   # Spannung L1 (1/100 V),            U32
 _REG_VOLTAGE_L2     = 30771   # Spannung L2 (1/100 V),            U32
@@ -34,6 +33,7 @@ _REG_STATUS         = 30201   # Betriebsstatus,                   U32
 
 _NAN_S32 = 0x80000000
 _NAN_U32 = 0xFFFFFFFF
+_NAN_ANY = (_NAN_S32, _NAN_U32)  # beide NaN-Muster abfangen
 
 STATUS_NAMES: dict[int, str] = {
     35:  "Fehler",
@@ -52,7 +52,6 @@ class SMAStatus:
     ip: str
     online: bool
     power_w: float = 0.0
-    day_yield_kwh: float = 0.0
     total_yield_kwh: float = 0.0
     voltage_l1: Optional[float] = None
     voltage_l2: Optional[float] = None
@@ -74,12 +73,12 @@ def _to_s32(regs: list[int]) -> Optional[int]:
 
 def _to_u32(regs: list[int]) -> Optional[int]:
     val = (regs[0] << 16) | regs[1]
-    return None if val == _NAN_U32 else val
+    return None if val in _NAN_ANY else val
 
 
 def _read_reg(client, address: int, unit_id: int) -> Optional[list[int]]:
     try:
-        r = client.read_holding_registers(address=address, count=2, slave=unit_id)
+        r = client.read_holding_registers(address=address, count=2, device_id=unit_id)
         if r.isError():
             return None
         return list(r.registers)
@@ -135,18 +134,14 @@ def fetch_sma_status(
             status.error = "Verbindung fehlgeschlagen"
             return status
 
+        # Verbindung steht → Gerät ist erreichbar
+        status.online = True
+
         regs = _read_reg(client, _REG_POWER_W, unit_id)
         if regs is not None:
             val = _to_s32(regs)
             if val is not None:
                 status.power_w = float(val)
-                status.online = True
-
-        regs = _read_reg(client, _REG_DAY_YIELD_WH, unit_id)
-        if regs is not None:
-            val = _to_u32(regs)
-            if val is not None:
-                status.day_yield_kwh = val / 1000.0
 
         regs = _read_reg(client, _REG_TOTAL_YIELD_WH, unit_id)
         if regs is not None:
