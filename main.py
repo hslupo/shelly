@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPalette
 from PyQt6.QtWidgets import (
     QApplication,
@@ -29,6 +29,40 @@ from PyQt6.QtWidgets import (
 
 from shelly_api import ShellyStatus, discover_devices, fetch_device
 from sma_api import SMAStatus, discover_sma_devices, fetch_sma_status
+
+
+# ---------------------------------------------------------------------------
+# Hintergrund-Worker (muss auf Modulebene stehen damit pyqtSignal funktioniert)
+# ---------------------------------------------------------------------------
+
+class _RefreshWorker(QThread):
+    shelly_done = pyqtSignal(list)
+    sma_done = pyqtSignal(object)
+
+    def __init__(self, devices: list, sma_cfg: dict):
+        super().__init__()
+        self._devices = devices
+        self._sma_cfg = sma_cfg
+
+    def run(self):
+        results = []
+        for dev in self._devices:
+            status = fetch_device(
+                ip=dev["ip"],
+                name=dev.get("name", ""),
+                gen=dev.get("gen"),
+            )
+            results.append(status)
+        self.shelly_done.emit(results)
+
+        sma_ip = self._sma_cfg.get("ip", "").strip()
+        if sma_ip:
+            sma_status = fetch_sma_status(
+                ip=sma_ip,
+                port=self._sma_cfg.get("port", 502),
+                unit_id=self._sma_cfg.get("unit_id", 3),
+            )
+            self.sma_done.emit(sma_status)
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 
@@ -521,40 +555,8 @@ class MainWindow(QMainWindow):
     def _refresh(self):
         self._refresh_btn.setEnabled(False)
         self._statusbar.showMessage("Aktualisiere …")
-
-        from PyQt6.QtCore import QThread, pyqtSignal
-
-        class Worker(QThread):
-            shelly_done = pyqtSignal(list)
-            sma_done = pyqtSignal(object)
-
-            def __init__(self, devices, sma_cfg):
-                super().__init__()
-                self._devices = devices
-                self._sma_cfg = sma_cfg
-
-            def run(self):
-                results = []
-                for dev in self._devices:
-                    status = fetch_device(
-                        ip=dev["ip"],
-                        name=dev.get("name", ""),
-                        gen=dev.get("gen"),
-                    )
-                    results.append(status)
-                self.shelly_done.emit(results)
-
-                sma_ip = self._sma_cfg.get("ip", "").strip()
-                if sma_ip:
-                    sma_status = fetch_sma_status(
-                        ip=sma_ip,
-                        port=self._sma_cfg.get("port", 502),
-                        unit_id=self._sma_cfg.get("unit_id", 3),
-                    )
-                    self.sma_done.emit(sma_status)
-
         sma_cfg = self._config.get("sma", {})
-        self._worker = Worker(self._config["devices"], sma_cfg)
+        self._worker = _RefreshWorker(self._config["devices"], sma_cfg)
         self._worker.shelly_done.connect(self._on_shelly_results)
         self._worker.sma_done.connect(self._on_sma_result)
         self._worker.start()
@@ -562,7 +564,7 @@ class MainWindow(QMainWindow):
     def _on_shelly_results(self, results: list[ShellyStatus]):
         for card, status in zip(self._cards, results):
             card.update_status(status)
-        from PyQt6.QtCore import QDateTime
+        from PyQt6.QtCore import QDateTime  # noqa: PLC0415
         now = QDateTime.currentDateTime().toString("HH:mm:ss")
         self._statusbar.showMessage(f"Zuletzt aktualisiert: {now}")
         self._refresh_btn.setEnabled(True)
